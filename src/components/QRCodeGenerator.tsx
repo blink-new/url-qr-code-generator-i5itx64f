@@ -69,64 +69,76 @@ export function QRCodeGenerator() {
     if (!isValidUrl(urlString)) return null
     
     setIsDetectingLogo(true)
+    console.log('🔍 Starting favicon detection for:', urlString)
+    
     try {
       const urlObj = new URL(urlString)
-      const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`
+      const domain = urlObj.hostname
       
-      // Use Google's favicon service as primary method (more reliable)
-      const googleFavicon = `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=64`
+      // Multiple favicon services and methods for better reliability
+      const faviconSources = [
+        // Google's favicon service (most reliable)
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+        // Alternative favicon services
+        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+        // Direct favicon URLs
+        `${urlObj.protocol}//${domain}/favicon.ico`,
+        `${urlObj.protocol}//${domain}/favicon.png`,
+        `${urlObj.protocol}//${domain}/apple-touch-icon.png`
+      ]
       
-      // Test if the favicon URL is accessible by trying to load it as an image
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const testImg = document.createElement('img')
-          testImg.onload = () => resolve()
-          testImg.onerror = () => reject(new Error('Favicon not accessible'))
-          testImg.src = googleFavicon
-          
-          // Timeout after 3 seconds
-          setTimeout(() => reject(new Error('Favicon load timeout')), 3000)
-        })
+      console.log('🔍 Testing favicon sources:', faviconSources)
+      
+      for (let i = 0; i < faviconSources.length; i++) {
+        const faviconUrl = faviconSources[i]
+        console.log(`🔍 Testing favicon ${i + 1}/${faviconSources.length}:`, faviconUrl)
         
-        setDetectedFavicon(googleFavicon)
-        return googleFavicon
-      } catch (testError) {
-        console.warn('Google favicon service failed:', testError)
-        
-        // Fallback: try common favicon locations
-        const faviconUrls = [
-          `${baseUrl}/favicon.ico`,
-          `${baseUrl}/favicon.png`,
-          `${baseUrl}/apple-touch-icon.png`,
-          `${baseUrl}/android-chrome-192x192.png`
-        ]
-        
-        for (const faviconUrl of faviconUrls) {
-          try {
-            await new Promise<void>((resolve, reject) => {
-              const testImg = document.createElement('img')
-              testImg.onload = () => resolve()
-              testImg.onerror = () => reject(new Error('Favicon not accessible'))
-              testImg.src = faviconUrl
-              
-              // Timeout after 2 seconds for each attempt
-              setTimeout(() => reject(new Error('Favicon load timeout')), 2000)
-            })
+        try {
+          // Test if favicon loads successfully
+          const isAccessible = await new Promise<boolean>((resolve) => {
+            const testImg = new Image()
+            testImg.crossOrigin = 'anonymous'
             
+            const timeoutId = setTimeout(() => {
+              console.log('⏰ Favicon test timeout for:', faviconUrl)
+              resolve(false)
+            }, 3000)
+            
+            testImg.onload = () => {
+              clearTimeout(timeoutId)
+              console.log('✅ Favicon loaded successfully:', faviconUrl)
+              resolve(true)
+            }
+            
+            testImg.onerror = () => {
+              clearTimeout(timeoutId)
+              console.log('❌ Favicon failed to load:', faviconUrl)
+              resolve(false)
+            }
+            
+            testImg.src = faviconUrl
+          })
+          
+          if (isAccessible) {
+            console.log('🎉 Using favicon:', faviconUrl)
             setDetectedFavicon(faviconUrl)
             return faviconUrl
-          } catch (e) {
-            // Continue to next URL
-            continue
           }
+        } catch (error) {
+          console.log('❌ Error testing favicon:', faviconUrl, error)
+          continue
         }
-        
-        // If all attempts fail, still try Google's service as last resort
-        setDetectedFavicon(googleFavicon)
-        return googleFavicon
       }
+      
+      // If no favicon found, use Google's service as fallback (it usually works even if test fails)
+      const fallbackFavicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=64`
+      console.log('🔄 Using fallback favicon:', fallbackFavicon)
+      setDetectedFavicon(fallbackFavicon)
+      return fallbackFavicon
+      
     } catch (error) {
-      console.error('Favicon detection failed:', error)
+      console.error('❌ Favicon detection failed:', error)
       setDetectedFavicon('')
       return null
     } finally {
@@ -166,6 +178,10 @@ export function QRCodeGenerator() {
   }
 
   const createQRWithLogo = async (qrDataUrl: string, logoUrl: string): Promise<string> => {
+    console.log('🎨 Starting QR + Logo integration')
+    console.log('📄 QR Data URL length:', qrDataUrl.length)
+    console.log('🖼️ Logo URL:', logoUrl)
+    
     try {
       // Check if canvas is supported
       if (typeof document === 'undefined' || !document.createElement) {
@@ -179,22 +195,30 @@ export function QRCodeGenerator() {
         throw new Error('Canvas context not available')
       }
 
+      console.log('✅ Canvas created successfully')
+
       // Create QR image with better error handling
       const qrImage = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = document.createElement('img')
-        img.crossOrigin = 'anonymous'
+        const img = new Image()
+        // Don't set crossOrigin for data URLs
+        if (!qrDataUrl.startsWith('data:')) {
+          img.crossOrigin = 'anonymous'
+        }
         
         const timeoutId = setTimeout(() => {
+          console.log('⏰ QR image load timeout')
           reject(new Error('QR image load timeout'))
         }, 10000)
         
         img.onload = () => {
           clearTimeout(timeoutId)
+          console.log('✅ QR image loaded:', img.width, 'x', img.height)
           resolve(img)
         }
         
-        img.onerror = () => {
+        img.onerror = (e) => {
           clearTimeout(timeoutId)
+          console.log('❌ QR image load error:', e)
           reject(new Error('Failed to load QR image'))
         }
         
@@ -204,27 +228,37 @@ export function QRCodeGenerator() {
       // Set canvas dimensions
       canvas.width = qrImage.width
       canvas.height = qrImage.height
+      console.log('📐 Canvas dimensions set:', canvas.width, 'x', canvas.height)
       
       // Draw QR code
       ctx.drawImage(qrImage, 0, 0)
+      console.log('✅ QR code drawn on canvas')
 
       // Try to load and draw logo
       try {
+        console.log('🔄 Loading logo image...')
         const logoImage = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = document.createElement('img')
-          img.crossOrigin = 'anonymous'
+          const img = new Image()
+          
+          // Handle CORS for external images
+          if (!logoUrl.startsWith('data:')) {
+            img.crossOrigin = 'anonymous'
+          }
           
           const timeoutId = setTimeout(() => {
+            console.log('⏰ Logo load timeout for:', logoUrl)
             reject(new Error('Logo load timeout'))
-          }, 5000)
+          }, 8000) // Increased timeout
           
           img.onload = () => {
             clearTimeout(timeoutId)
+            console.log('✅ Logo image loaded:', img.width, 'x', img.height)
             resolve(img)
           }
           
-          img.onerror = () => {
+          img.onerror = (e) => {
             clearTimeout(timeoutId)
+            console.log('❌ Logo load error for:', logoUrl, e)
             reject(new Error('Failed to load logo'))
           }
           
@@ -238,6 +272,14 @@ export function QRCodeGenerator() {
         const logoX = centerX - logoSize / 2
         const logoY = centerY - logoSize / 2
         
+        console.log('📐 Logo positioning:', {
+          logoSize,
+          centerX,
+          centerY,
+          logoX,
+          logoY
+        })
+        
         // Create white background circle for logo with border
         const backgroundRadius = logoSize / 2 + 8
         
@@ -246,6 +288,7 @@ export function QRCodeGenerator() {
         ctx.beginPath()
         ctx.arc(centerX, centerY, backgroundRadius, 0, 2 * Math.PI)
         ctx.fill()
+        console.log('✅ White background circle drawn')
         
         // Add subtle border around the background
         ctx.strokeStyle = '#e5e7eb'
@@ -253,6 +296,7 @@ export function QRCodeGenerator() {
         ctx.beginPath()
         ctx.arc(centerX, centerY, backgroundRadius, 0, 2 * Math.PI)
         ctx.stroke()
+        console.log('✅ Border drawn')
         
         // Draw logo with circular clipping for perfect centering
         ctx.save()
@@ -263,16 +307,19 @@ export function QRCodeGenerator() {
         // Draw the logo perfectly centered
         ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize)
         ctx.restore()
+        console.log('✅ Logo drawn and clipped')
         
       } catch (logoError) {
-        console.warn('Logo integration failed, using QR without logo:', logoError)
+        console.warn('⚠️ Logo integration failed, using QR without logo:', logoError)
         // Continue without logo if logo loading fails
       }
 
-      return canvas.toDataURL('image/png')
+      const finalDataUrl = canvas.toDataURL('image/png')
+      console.log('🎉 Final QR with logo created, data URL length:', finalDataUrl.length)
+      return finalDataUrl
       
     } catch (error) {
-      console.error('Canvas QR creation failed:', error)
+      console.error('❌ Canvas QR creation failed:', error)
       // Return original QR code if canvas operations fail
       return qrDataUrl
     }
@@ -317,26 +364,44 @@ export function QRCodeGenerator() {
 
       // Add logo if enabled
       if (logoEnabled) {
+        console.log('🖼️ Logo integration enabled')
         let logoUrl = ''
         
         if (logoFile && logoPreview) {
+          console.log('📁 Using uploaded logo file')
           logoUrl = logoPreview
         } else if (autoDetectLogo) {
+          console.log('🔍 Auto-detecting favicon for:', targetUrl)
           const favicon = await detectFavicon(targetUrl)
           if (favicon) {
+            console.log('✅ Favicon detected:', favicon)
             logoUrl = favicon
+          } else {
+            console.log('❌ No favicon detected')
           }
         }
         
         if (logoUrl) {
+          console.log('🎨 Proceeding with logo integration using:', logoUrl)
           try {
             finalQrDataUrl = await createQRWithLogo(qrDataUrl, logoUrl)
-            // Check if logo integration actually worked
+            // Check if logo integration actually worked by comparing data URLs
             if (finalQrDataUrl === qrDataUrl) {
-              console.warn('Logo integration returned original QR code')
+              console.warn('⚠️ Logo integration returned original QR code - no changes made')
+              toast({
+                title: "Logo Integration Issue",
+                description: "Logo could not be integrated, using QR code without logo",
+                variant: "destructive"
+              })
+            } else {
+              console.log('🎉 Logo integration successful!')
+              toast({
+                title: "Success!",
+                description: "QR code with logo generated successfully"
+              })
             }
           } catch (error) {
-            console.error('Logo integration failed:', error)
+            console.error('❌ Logo integration failed:', error)
             // Use QR code without logo if logo integration fails
             finalQrDataUrl = qrDataUrl
             toast({
@@ -345,6 +410,13 @@ export function QRCodeGenerator() {
               variant: "destructive"
             })
           }
+        } else {
+          console.log('⚠️ No logo URL available for integration')
+          toast({
+            title: "No Logo Found",
+            description: "Could not detect or load logo, generating QR code without logo",
+            variant: "destructive"
+          })
         }
       }
       
